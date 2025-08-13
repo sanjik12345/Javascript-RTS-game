@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mini RTS (JS + Canvas)</title>
+  <style>
+    :root {
+      --bg: #0e1013;
+      --panel: #171a1f;
+      --accent: #4cc9f0;
+      --accent2: #f72585;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --good: #40c463;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, Noto Sans, "Nimbus Sans L", sans-serif;
+      display: grid; place-items: center;
+    }
+    .app {
+      width: min(1100px, 100vw);
+      display: grid;
+      grid-template-columns: 760px 1fr;
+      gap: 12px; padding: 12px;
+    }
+    canvas { width: 760px; height: 428px; border-radius: 12px; background:#1a1f27; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+    .ui { display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; }
+    .panel { background: var(--panel); border-radius: 12px; padding: 10px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .resources { display: flex; gap: 10px; font-weight: 600; }
+    .pill { background: #0f1318; padding: 6px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+
+    .btn-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
+    .btn {
+      background: #101419; color: var(--text); border: none; cursor: pointer; border-radius: 10px;
+      padding: 10px; text-align: left; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+      transition: transform .04s ease, background .2s ease; font-weight: 600; line-height: 1.2;
+    }
+    .btn:hover { background: #0b1118; transform: translateY(-1px); }
+    .btn.small { font-size: 12px; padding: 8px; }
+    .btn .sub { display:block; font-weight: 500; color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+    .hint { color: var(--muted); font-size: 12px; }
+    .legend { display:grid; gap:6px; font-size:12px; color: var(--muted); }
+
+    .selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .header { display:flex; justify-content:space-between; align-items:center; }
+    .header h2 { margin:0; font-size: 16px; letter-spacing:.3px; }
+
+    .footer { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    .badge { font-size: 11px; color:var(--muted); }
+
+    /* Selection panel */
+    .sel-empty { color: var(--muted); font-size: 13px; }
+    .sel-card { display:grid; grid-template-columns: 56px 1fr; gap:10px; align-items:center; }
+    .sel-icon { width:56px; height:56px; background:#0f1318; border-radius:10px; display:grid; place-items:center; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+    .sel-icon img { width:100%; height:100%; object-fit:contain; }
+    .sel-name { font-weight:700; font-size:14px; }
+    .hpbar { width:100%; height:10px; background:#101419; border-radius:999px; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+    .hpbar > div { height:100%; background: linear-gradient(90deg, #35d07f, #40c463); }
+    .sel-desc { color: var(--muted); font-size:12px; margin-top:6px; }
+    .sel-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; }
+    .sel-mini { background:#0f1318; border-radius:8px; padding:6px; text-align:center; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+    .sel-mini img { width:40px; height:40px; object-fit:contain; display:block; margin:0 auto 6px; }
+    .sel-mini .cap { font-size:11px; color:var(--muted); }
+    .sel-mini .mini-hp { width:100%; height:6px; background:#101419; border-radius:999px; overflow:hidden; margin-top:4px; }
+    .sel-mini .mini-hp > div { height:100%; background:#40c463; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <canvas id="game" width="960" height="540"></canvas>
+
+    <div class="ui">
+      <div class="panel header">
+        <h2>Mini RTS</h2>
+        <div class="resources">
+          <div class="pill" id="gold">🪙 0</div>
+          <div class="pill" id="wood">🪵 0</div>
+          <div class="pill" id="pop">👥 0/0</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:8px"><strong>Строительство</strong></div>
+        <div class="btn-grid" id="buildButtons"></div>
+        <hr style="opacity:.08; border:none; border-top:1px solid rgba(255,255,255,.08); margin:10px 0">
+        <div class="row" style="margin-bottom:8px"><strong>Тренировка юнитов</strong></div>
+        <div class="btn-grid" id="trainButtons"></div>
+      </div>
+
+      <!-- NEW: Панель выбора -->
+      <div class="panel" id="selectionPanel">
+        <div id="selectionContent"></div>
+      </div>
+
+      <div class="panel footer">
+        <div class="legend">
+          <div>ЛКМ — выделить / поставить здание • ПКМ — двигаться</div>
+          <div>Перетаскивайте мышью, чтобы выделить несколько юнитов</div>
+          <div class="badge">PNG-ассеты можно заменить в ASSETS ниже (пути к файлам)</div>
+        </div>
+        <button class="btn small" id="resetBtn">Сброс</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ==============================
+  //  CONFIG: заменить пути к PNG
+  // ==============================
+  const ASSETS = {
+    tiles: {
+      grass: 'assets/grass.png', // тайл земли
+    },
+    buildings: {
+      townhall: 'assets/townhall.png',
+      house: 'assets/house.png',
+      barracks: 'assets/barracks.png',
+      farm: 'assets/farm.png',
+    },
+    units: {
+      villager: 'assets/villager.png',
+      soldier: 'assets/soldier.png',
+    },
+    icons: { // можно оставить пустым — тогда будут использованы те же спрайты
+      townhall: 'assets/townhall.png',
+      house: 'assets/house.png',
+      barracks: 'assets/barracks.png',
+      farm: 'assets/farm.png',
+      villager: 'assets/villager.png',
+      soldier: 'assets/soldier.png',
+    },
+    ui: {
+      select: 'assets/select.png'
+    }
+  };
+
+  // ================
+  //   GAME STATE
+  // ================
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  const UI = {
+    gold: document.getElementById('gold'),
+    wood: document.getElementById('wood'),
+    pop: document.getElementById('pop'),
+    buildButtons: document.getElementById('buildButtons'),
+    trainButtons: document.getElementById('trainButtons'),
+    resetBtn: document.getElementById('resetBtn'),
+    selContent: document.getElementById('selectionContent'),
+  };
+
+  // Карта
+  const TILE = 48; // размер тайла
+  const MAP_W = Math.floor(canvas.width / TILE);
+  const MAP_H = Math.floor(canvas.height / TILE);
+
+  const grid = new Array(MAP_W * MAP_H).fill(0); // 0-свободно, 1-занято
+  function gridIndex(tx, ty) { return ty * MAP_W + tx; }
+
+  // Ресурсы и население
+  const resources = { gold: 250, wood: 150 };
+  let pop = 0, popCap = 0;
+
+  // Списки объектов
+  const buildings = []; // {id,type,x,y,w,h,hp,maxHp,desc,income:{gold,wood,popcap},selected}
+  const units = [];     // {id,type,x,y,vx,vy,speed,hp,maxHp,desc,selected,tx,ty}
+
+  // Выделение мышью
+  let mouse = { x: 0, y: 0, down: false, drag: false, sx: 0, sy: 0 };
+
+  // Режим действия: null или { mode:'build', def: BUILD_DEFS[key] }
+  let action = null;
+
+  // ==================
+  //   DEFINITIONS
+  // ==================
+  const BUILD_DEFS = {
+    townhall: { key:'townhall', name:'Ратуша', maxHp:2000, desc:'Центральное здание. Даёт базовый доход и лимит населения.', cost:{gold:100, wood:100}, size:[3,3], income:{gold:2, wood:1, popcap:5} },
+    house:    { key:'house',    name:'Дом',    maxHp:500,  desc:'Жилище. Увеличивает лимит населения.', cost:{gold: 50, wood: 60}, size:[2,2], income:{gold:0, wood:0, popcap:3} },
+    barracks: { key:'barracks', name:'Казармы',maxHp:1000, desc:'Военное здание. Обучает поселенцев и пехоту.', cost:{gold:120, wood:90}, size:[3,2], income:{gold:0, wood:0, popcap:0}, canTrain:['villager','soldier'] },
+    farm:     { key:'farm',     name:'Ферма',  maxHp:600,  desc:'Сельхозпостройка. Даёт дополнительную древесину со временем.', cost:{gold: 40, wood:70}, size:[2,2], income:{gold:0, wood:2, popcap:0} },
+  };
+
+  const UNIT_DEFS = {
+    villager: { key:'villager', name:'Поселенец', maxHp:120, desc:'Базовый рабочий. Быстрый и дешёвый.', cost:{gold:30, wood:0}, speed: 80 },
+    soldier:  { key:'soldier',  name:'Пехотинец', maxHp:180, desc:'Боец ближнего боя. Медленнее, но крепче.', cost:{gold:60, wood:20}, speed: 90 },
+  };
+
+  const BUILD_KEYS = ['townhall','house','barracks','farm'];
+
+  // Рисование загрузки тайлов/спрайтов
+  const images = new Map();
+  function loadImage(path) {
+    if (!path) return Promise.resolve(null);
+    if (images.has(path)) return images.get(path);
+    const p = new Promise(res => { const i = new Image(); i.onload=()=>res(i); i.src = path; });
+    images.set(path, p); return p;
+  }
+
+  // Предзагрузка
+  let grassImg = null;
+  loadImage(ASSETS.tiles.grass).then(img => grassImg = img);
+  [...Object.values(ASSETS.buildings), ...Object.values(ASSETS.units), ...Object.values(ASSETS.icons)].forEach(loadImage);
+  loadImage(ASSETS.ui.select);
+
+  // ==================
+  //   HELPERS
+  // ==================
+  function canAfford(cost) { return (!cost.gold || resources.gold >= cost.gold) && (!cost.wood || resources.wood >= cost.wood); }
+  function pay(cost) { if (cost.gold) resources.gold -= cost.gold; if (cost.wood) resources.wood -= cost.wood; }
+  function worldToTile(px, py){ return [Math.floor(px/TILE), Math.floor(py/TILE)]; }
+
+  function placeBuilding(def, tx, ty) {
+    const [w,h] = def.size;
+    if (tx < 0 || ty < 0 || tx + w > MAP_W || ty + h > MAP_H) return false;
+    for (let x=0;x<w;x++) for (let y=0;y<h;y++) { if (grid[gridIndex(tx+x, ty+y)] === 1) return false; }
+    if (!canAfford(def.cost)) return false;
+    pay(def.cost);
+    for (let x=0;x<w;x++) for (let y=0;y<h;y++) grid[gridIndex(tx+x, ty+y)] = 1;
+    const id = crypto.randomUUID();
+    buildings.push({ id, type:def.key, x:tx*TILE, y:ty*TILE, w:w*TILE, h:h*TILE, selected:false, income:def.income||{gold:0,wood:0,popcap:0}, hp:def.maxHp, maxHp:def.maxHp, desc:def.desc });
+    if (def.income?.popcap) popCap += def.income.popcap;
+    return true;
+  }
+
+  function addUnit(type, x, y) {
+    if (pop >= popCap) return false;
+    const def = UNIT_DEFS[type];
+    if (!canAfford(def.cost)) return false;
+    pay(def.cost);
+    const id = crypto.randomUUID();
+    units.push({ id, type, x, y, vx:0, vy:0, speed:def.speed, selected:false, tx:x, ty:y, hp:def.maxHp, maxHp:def.maxHp, desc:def.desc });
+    pop++;
+    return true;
+  }
+
+  function tryTrainFromSelection(kind) {
+    const selectedBarracks = buildings.filter(b=>b.selected && b.type==='barracks');
+    if (selectedBarracks.length===0) return false;
+    let done=false;
+    for (const b of selectedBarracks) {
+      const spawnX = b.x + b.w + 6; // справа от здания
+      const spawnY = b.y + b.h/2;
+      if (addUnit(kind, spawnX, spawnY)) done = true; else break;
+    }
+    return done;
+  }
+
+  // ==================
+  //   UI BUTTONS
+  // ==================
+  function fmtCost(cost){ const g = cost.gold?`🪙${cost.gold}`:''; const w = cost.wood?`🪵${cost.wood}`:''; return [g,w].filter(Boolean).join(' · '); }
+  function renderBuildButtons(){
+    UI.buildButtons.innerHTML = '';
+    for (const key of BUILD_KEYS){
+      const def = BUILD_DEFS[key];
+      const btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.innerHTML = `${def.name}<span class="sub">${fmtCost(def.cost)} · ${def.size[0]}x${def.size[1]}</span>`;
+      btn.onclick = () => { action = { mode:'build', def }; };
+      UI.buildButtons.appendChild(btn);
+    }
+  }
+  function renderTrainButtons(){
+    UI.trainButtons.innerHTML = '';
+    const mk = (key)=>{
+      const def = UNIT_DEFS[key];
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.innerHTML = `${def.name}<span class="sub">${fmtCost(def.cost)}</span>`;
+      b.onclick = () => tryTrainFromSelection(key);
+      UI.trainButtons.appendChild(b);
+    };
+    mk('villager'); mk('soldier');
+  }
+  UI.resetBtn.onclick = ()=>{ window.location.reload(); };
+  renderBuildButtons();
+  renderTrainButtons();
+
+  // ==================
+  //   INPUT
+  // ==================
+  canvas.addEventListener('contextmenu', e=>e.preventDefault());
+  canvas.addEventListener('mousemove', e=>{
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (canvas.width/rect.width);
+    mouse.y = (e.clientY - rect.top) * (canvas.height/rect.height);
+    if (mouse.down) mouse.drag = true;
+  });
+  canvas.addEventListener('mousedown', e=>{
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * (canvas.width/rect.width);
+    mouse.y = (e.clientY - rect.top) * (canvas.height/rect.height);
+    mouse.down = true; mouse.drag = false; mouse.sx = mouse.x; mouse.sy = mouse.y;
+    if (e.button === 0) {
+      if (action?.mode==='build') {
+        const [tx,ty] = worldToTile(mouse.x, mouse.y);
+        if (placeBuilding(action.def, tx, ty)) action = null;
+      }
+    }
+  });
+  window.addEventListener('mouseup', e=>{
+    if (mouse.down && mouse.drag) {
+      const x1 = Math.min(mouse.sx, mouse.x), y1 = Math.min(mouse.sy, mouse.y);
+      const x2 = Math.max(mouse.sx, mouse.x), y2 = Math.max(mouse.sy, mouse.y);
+      const inBox = (x,y,w,h)=> x>=x1 && y>=y1 && x+w<=x2 && y+h<=y2;
+      let any=false;
+      for (const u of units){ u.selected = inBox(u.x-8, u.y-8, 16, 16) || u.selected; if (u.selected) any=true; }
+      for (const b of buildings){ b.selected = inBox(b.x, b.y, b.w, b.h) || b.selected; if (b.selected) any=true; }
+      if (!any) { buildings.forEach(b=>b.selected=false); units.forEach(u=>u.selected=false); }
+    } else if (mouse.down && !mouse.drag) {
+      const hitUnit = units.find(u=> Math.abs(u.x - mouse.x) < 12 && Math.abs(u.y - mouse.y) < 12);
+      const hitBuilding = buildings.find(b=> mouse.x>=b.x && mouse.x<=b.x+b.w && mouse.y>=b.y && mouse.y<=b.y+b.h);
+      if (hitUnit) { units.forEach(u=>u.selected=false); buildings.forEach(b=>b.selected=false); hitUnit.selected=true; }
+      else if (hitBuilding) { buildings.forEach(b=>b.selected=false); units.forEach(u=>u.selected=false); hitBuilding.selected=true; }
+      else { buildings.forEach(b=>b.selected=false); units.forEach(u=>u.selected=false); }
+    }
+    mouse.down = false; mouse.drag = false;
+    renderSelectionPanel();
+  });
+  window.addEventListener('contextmenu', e=>{
+    if (e.target===canvas) {
+      const dest = { x: mouse.x, y: mouse.y };
+      const sel = units.filter(u=>u.selected);
+      sel.forEach((u,i)=>{
+        const spread = 18; const offx = ((i%4)-1.5)*spread; const offy = (Math.floor(i/4))*spread;
+        u.tx = dest.x + offx; u.ty = dest.y + offy;
+      });
+    }
+  });
+
+  // ==================
+  //   ECONOMY
+  // ==================
+  let acc = 0;
+  function econTick(){
+    resources.gold += 1; resources.wood += 1; // базовый пассив
+    for (const b of buildings) {
+      if (b.income?.gold) resources.gold += b.income.gold;
+      if (b.income?.wood) resources.wood += b.income.wood;
+    }
+  }
+
+  // ==================
+  //   RENDER SELECTION PANEL
+  // ==================
+  function imgTagFor(key){
+    const path = ASSETS.icons[key] || ASSETS.buildings[key] || ASSETS.units[key] || '';
+    return path ? `<img src="${path}" alt="${key}">` : '';
+  }
+  function hpBarPct(hp, maxHp){ return Math.max(0, Math.min(1, hp/maxHp)); }
+
+  function renderSelectionPanel(){
+    const selectedUnits = units.filter(u=>u.selected);
+    const selectedBuildings = buildings.filter(b=>b.selected);
+    const total = selectedUnits.length + selectedBuildings.length;
+    const el = UI.selContent;
+
+    if (total === 0) { el.innerHTML = `<div class="sel-empty">Ничего не выбрано</div>`; return; }
+
+    if (total === 1) {
+      const obj = selectedUnits[0] || selectedBuildings[0];
+      const def = selectedUnits[0] ? UNIT_DEFS[obj.type] : BUILD_DEFS[obj.type];
+      const icon = imgTagFor(obj.type);
+      const extra = selectedUnits[0]
+        ? `<div class="hint">Скорость: ${def.speed}</div>`
+        : `<div class="hint">Доход: ${def.income?.gold||0}🪙 / ${def.income?.wood||0}🪵 · Лимит: +${def.income?.popcap||0}</div>`;
+      const pct = Math.round(hpBarPct(obj.hp, obj.maxHp)*100);
+      el.innerHTML = `
+        <div class="sel-card">
+          <div class="sel-icon">${icon}</div>
+          <div>
+            <div class="sel-name">${def.name}</div>
+            <div class="hpbar" title="Здоровье: ${obj.hp}/${obj.maxHp}"><div style="width:${pct}%"></div></div>
+            <div class="sel-desc">${obj.desc||''}</div>
+            ${extra}
+          </div>
+        </div>`;
+      return;
+    }
+
+    // Несколько объектов — компактная сетка
+    const items = [...selectedBuildings, ...selectedUnits].map(o=>{
+      const def = o.maxHp? (UNIT_DEFS[o.type]||BUILD_DEFS[o.type]) : null;
+      const pct = Math.round(hpBarPct(o.hp, o.maxHp)*100);
+      return `<div class="sel-mini">${imgTagFor(o.type)}<div class="mini-hp"><div style="width:${pct}%"></div></div><div class="cap">${def?.name||o.type}</div></div>`;
+    }).join('');
+    el.innerHTML = `<div class="sel-grid">${items}</div>`;
+  }
+
+  // ==================
+  //   UPDATE & DRAW
+  // ==================
+  let last = performance.now();
+  function loop(t){
+    const dt = Math.min(0.033, (t - last)/1000); last = t; acc += dt;
+
+    if (acc >= 1) { econTick(); acc = 0; }
+
+    // Движение юнитов
+    for (let i=0;i<units.length;i++){
+      const u = units[i];
+      const dx = u.tx - u.x; const dy = u.ty - u.y; const dist = Math.hypot(dx,dy);
+      if (dist > 2) {
+        const nx = dx/dist, ny = dy/dist; let speed = u.speed;
+        for (let j=0;j<units.length;j++) if (i!==j){ const v = units[j]; const d2 = Math.hypot(u.x - v.x, u.y - v.y); if (d2 < 18) speed *= 0.8; }
+        u.vx = nx * speed; u.vy = ny * speed; u.x += u.vx * dt; u.y += u.vy * dt;
+      } else { u.vx = u.vy = 0; }
+    }
+
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function draw(){
+    // Фон/тайлы
+    if (grassImg) {
+      for (let x=0;x<MAP_W;x++) for (let y=0;y<MAP_H;y++) ctx.drawImage(grassImg, x*TILE, y*TILE, TILE, TILE);
+    } else {
+      ctx.fillStyle = '#1a1f27'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      for (let x=0;x<MAP_W;x++) for (let y=0;y<MAP_H;y++){ ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.strokeRect(x*TILE, y*TILE, TILE, TILE); }
+    }
+
+    // Призрак строения
+    if (action?.mode==='build'){
+      const def = action.def; const [tx,ty] = worldToTile(mouse.x, mouse.y);
+      const [w,h] = def.size; const ok = canPlace(def, tx, ty) && canAfford(def.cost);
+      ctx.save(); ctx.globalAlpha = 0.6; ctx.fillStyle = ok ? 'rgba(64,196,99,.25)' : 'rgba(247,37,133,.25)'; ctx.fillRect(tx*TILE, ty*TILE, w*TILE, h*TILE); ctx.restore();
+      const sprite = ASSETS.buildings[def.key]; const imgP = images.get(sprite); if (imgP) imgP.then(img=> img && ctx.drawImage(img, tx*TILE, ty*TILE, w*TILE, h*TILE));
+    }
+
+    // Здания
+    for (const b of buildings){
+      const sprite = ASSETS.buildings[b.type];
+      const imgP = images.get(sprite);
+      if (imgP) imgP.then(img=> img && ctx.drawImage(img, b.x, b.y, b.w, b.h)); else { ctx.fillStyle = '#243140'; ctx.fillRect(b.x, b.y, b.w, b.h); }
+      // HP bar над зданием
+      drawHpBar(b.x, b.y-8, b.w, b.hp, b.maxHp);
+      if (b.selected) drawSelectionRect(b.x, b.y, b.w, b.h);
+    }
+
+    // Юниты
+    for (const u of units){
+      const sprite = ASSETS.units[u.type]; const imgP = images.get(sprite);
+      if (imgP) imgP.then(img=> img && ctx.drawImage(img, u.x-12, u.y-12, 24, 24)); else { ctx.fillStyle = '#e2e8f0'; ctx.beginPath(); ctx.arc(u.x, u.y, 8, 0, Math.PI*2); ctx.fill(); }
+      // HP bar над юнитом
+      drawHpBar(u.x-12, u.y-18, 24, u.hp, u.maxHp);
+      if (u.selected) drawSelectionCircle(u.x, u.y, 12);
+    }
+
+    // Рамка выделения
+    if (mouse.down && mouse.drag){
+      const x = Math.min(mouse.sx, mouse.x), y = Math.min(mouse.sy, mouse.y);
+      const w = Math.abs(mouse.sx - mouse.x), h = Math.abs(mouse.sy - mouse.y);
+      ctx.strokeStyle = 'rgba(76,201,240,.9)'; ctx.lineWidth = 1; ctx.strokeRect(x,y,w,h);
+      ctx.fillStyle = 'rgba(76,201,240,.15)'; ctx.fillRect(x,y,w,h);
+    }
+
+    // UI ресурсы
+    UI.gold.textContent = `🪙 ${resources.gold}`;
+    UI.wood.textContent = `🪵 ${resources.wood}`;
+    UI.pop.textContent = `👥 ${pop}/${popCap}`;
+  }
+
+  function drawSelectionRect(x,y,w,h){ ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 2; ctx.strokeRect(x+1,y+1,w-2,h-2); }
+  function drawSelectionCircle(x,y,r){ ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke(); }
+  function drawHpBar(x,y,w,hp,maxHp){
+    const pct = Math.max(0, Math.min(1, hp/maxHp));
+    ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(x, y, w, 4);
+    ctx.fillStyle = '#35d07f'; ctx.fillRect(x, y, w*pct, 4);
+    ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.strokeRect(x, y, w, 4);
+  }
+
+  function canPlace(def, tx, ty){
+    const [w,h] = def.size;
+    if (tx < 0 || ty < 0 || tx + w > MAP_W || ty + h > MAP_H) return false;
+    for (let x=0;x<w;x++) for (let y=0;y<h;y++) if (grid[gridIndex(tx+x, ty+y)] === 1) return false;
+    return true;
+  }
+
+  // ==================
+  //   INITIAL SETUP
+  // ==================
+  (function init(){
+    const startTx = Math.floor(MAP_W/2) - 2;
+    const startTy = Math.floor(MAP_H/2) - 2;
+    placeBuilding(BUILD_DEFS.townhall, startTx, startTy);
+    placeBuilding(BUILD_DEFS.house, startTx-3, startTy+2);
+    placeBuilding(BUILD_DEFS.house, startTx+4, startTy+2);
+    addUnit('villager', (startTx+1.5)*TILE, (startTy-0.5)*TILE);
+    renderSelectionPanel();
+  })();
+
+  requestAnimationFrame(loop);
+
+  </script>
+</body>
+</html>
